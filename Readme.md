@@ -1,1 +1,1 @@
-# Bitcoin like Blockchain implementation in pure Rust from scratch
+# Blockchain implementation in pure Rust from scratch
