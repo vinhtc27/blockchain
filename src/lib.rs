@@ -21,4 +21,11 @@ pub enum Error {
         #[from]
         source: speedy::Error,
     },
+    #[error("Hex error")]
+    HexError {
+        #[from]
+        source: hex::FromHexError,
+    },
+    #[error("Custom error")]
+    CustomError(String),
 }
