@@ -1,15 +1,17 @@
 use serde_derive::{Deserialize, Serialize};
 use std::{
     collections::HashMap,
-    fs::{metadata, File, OpenOptions},
+    fs::{create_dir_all, File, OpenOptions},
     io::{Read, Write},
+    path::Path,
 };
 
 use crate::Result;
 
 use super::wallet::Wallet;
 
-static WALLET_FILE: &str = "./tmp/wallets.data";
+static WALLET_PATH: &str = "./tmp/wallet";
+static WALLET_FILE: &str = "./tmp/wallet/wallets.data";
 
 #[derive(Serialize, Deserialize)]
 pub struct Wallets {
@@ -21,11 +23,14 @@ impl Wallets {
         let mut wallets = Wallets {
             wallets: HashMap::new(),
         };
-        if metadata(WALLET_FILE).is_ok() {
+        if Path::new(WALLET_FILE).exists() {
             let mut file = File::open(WALLET_FILE)?;
             let mut buffer = vec![];
             file.read_to_end(&mut buffer)?;
             wallets = bincode::deserialize(&buffer)?;
+        } else {
+            create_dir_all(WALLET_PATH)?;
+            File::create(WALLET_FILE)?;
         }
         Ok(wallets)
     }
@@ -35,6 +40,10 @@ impl Wallets {
         let address = wallet.address();
         self.wallets.insert(address.clone(), wallet);
         address
+    }
+
+    pub fn get_wallet(&mut self, address: &str) -> Option<&mut Wallet> {
+        self.wallets.get_mut(address)
     }
 
     pub fn get_addresses(&self) -> Vec<String> {

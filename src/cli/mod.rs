@@ -1,4 +1,8 @@
-use crate::{blockchain::BlockChain, wallet::Wallets, Error, Result};
+use crate::{
+    blockchain::BlockChain,
+    wallet::{validate_address, Wallets},
+    Error, Result,
+};
 use std::{env, fmt, process, str::FromStr};
 
 pub struct CommandLine {
@@ -52,22 +56,25 @@ impl CommandLine {
     }
 
     fn create_blockchain(&self, address: &str) -> Result<()> {
-        let _ = BlockChain::init_blockchain(address.to_owned())?;
+        if !validate_address(address)? {
+            return Err(Error::CustomError(
+                "Invalid address (create_blockchain)".to_owned(),
+            ));
+        }
+        let _ = BlockChain::init_blockchain(address)?;
         println!("Blockchain created!");
 
         Ok(())
     }
 
     fn send_coin(&self, from: &str, to: &str, amount: u64) -> Result<()> {
-        if amount == 0 {
-            return Err(Error::CustomError(
-                "Amount must be bigger than 0".to_owned(),
-            ));
+        if !validate_address(from)? || !validate_address(to)? {
+            return Err(Error::CustomError("Invalid address (send_coin)".to_owned()));
         }
 
         let mut chain = BlockChain::continue_blockchain()?;
 
-        let tx = chain.new_txs(from, to, amount)?;
+        let tx = chain.new_transaction(from, to, amount)?;
         chain.add_block(vec![tx])?;
 
         println!("Send from {} -> {} success!", from, to);
@@ -76,13 +83,18 @@ impl CommandLine {
     }
 
     fn get_balance(&self, address: &str) -> Result<()> {
+        if !validate_address(address)? {
+            return Err(Error::CustomError(
+                "Invalid address (get_balance)".to_owned(),
+            ));
+        }
+
         let chain = BlockChain::continue_blockchain()?;
-
         let mut balance = 0u64;
-        let utxos = chain.find_utxo(address)?;
 
+        let utxos = chain.find_utxo(address)?; //? UTXOs: Unspent Transaction Outputs
         for output in utxos {
-            balance += output.value()
+            balance += output.value
         }
 
         println!("Balance of {}: {}", address, balance);
@@ -106,13 +118,13 @@ impl CommandLine {
         wallets.save_file()?;
 
         println!("New wallet address {:?}", address);
-
         Ok(())
     }
 
     fn list_addresses(&self) -> Result<()> {
         let wallets = Wallets::create_wallets()?;
         let addresses = wallets.get_addresses();
+        wallets.save_file()?;
 
         println!("Addresses");
         for address in addresses {
@@ -143,7 +155,11 @@ impl FromStr for Command {
             "print_blockchain" => Ok(Command::PrintBlockchain),
             "create_wallet" => Ok(Command::CreateWallet),
             "list_addresses" => Ok(Command::ListAddresses),
-            command => Err(format!("Invalid command {}", command).to_owned()),
+            _ => {
+                println!("Invalid command!\n");
+                print_usage_and_exit();
+                Err(String::new())
+            }
         }
     }
 }

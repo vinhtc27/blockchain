@@ -1,3 +1,7 @@
+#![allow(clippy::module_inception)]
+#![allow(rust_2018_idioms)]
+#![deny(unsafe_code)]
+
 pub mod blockchain;
 pub mod cli;
 pub mod wallet;
@@ -32,6 +36,11 @@ pub enum Error {
     Base58Error {
         #[from]
         source: bs58::decode::Error,
+    },
+    #[error("P256 error")]
+    P256Error {
+        #[from]
+        source: p256::ecdsa::Error,
     },
     #[error("Io error")]
     IoError {

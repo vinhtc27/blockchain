@@ -3,19 +3,18 @@ use sha2::{Digest, Sha256};
 
 use super::block::Block;
 
-//? Proof Of Work (PoW)
-//1. Take data from the block
+//? Proof Of Work (PoW):
+//Step 1: Take data from the block
 
-//2. Create a counter (nonce) start at 0
+//Step 2: Create a counter (nonce) start at 0
 
-//3. Create a hash of the data plus the counter
+//Step 3: Create a hash of the data plus the counter
 
-//4. Check the hash to see if it meets a set of requirements
+//Step 4: Check the hash to see if it meets a set of requirements
 
-//? Requirements:
-//1. The first few bytes must contain 0s (more 0 mean harder)
+//? Requirements: The first few bytes must contain 0s (more 0 mean harder)
 
-static DIFFICULTY: i64 = 12;
+static DIFFICULTY: u64 = 12;
 
 pub(crate) struct ProofOfWork<'a> {
     block: &'a Block,
@@ -23,7 +22,7 @@ pub(crate) struct ProofOfWork<'a> {
 }
 
 impl<'a> ProofOfWork<'a> {
-    fn init_data(&self, nonce: i64) -> Vec<u8> {
+    fn init_data(&self, nonce: u64) -> Vec<u8> {
         let mut data = vec![];
         data.extend_from_slice(&self.block.prevhash);
         data.extend_from_slice(&self.block.hash_transactions());
@@ -33,15 +32,15 @@ impl<'a> ProofOfWork<'a> {
     }
 
     pub(crate) fn new_proof(block: &'a Block) -> Self {
-        let target = BigInt::from(1i64);
+        let target = BigInt::from(1u64);
         let target = target << (256 - DIFFICULTY);
 
         Self { block, target }
     }
 
-    pub(crate) fn run(&self) -> (i64, [u8; 32]) {
+    pub(crate) fn run(&self) -> (u64, [u8; 32]) {
         let mut block_hash = [0u8; 32];
-        let mut nonce = 0i64;
+        let mut nonce = 0u64;
 
         loop {
             let data = self.init_data(nonce);

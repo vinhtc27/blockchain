@@ -10,7 +10,7 @@ pub(crate) struct Block {
     pub(crate) transactions: Vec<Transaction>,
     pub(crate) prevhash: Vec<u8>,
     pub(crate) hash: Vec<u8>,
-    pub(crate) nonce: i64,
+    pub(crate) nonce: u64,
 }
 
 impl<'a> Block {
@@ -34,7 +34,7 @@ impl<'a> Block {
             transactions,
             prevhash,
             hash: vec![],
-            nonce: 0i64,
+            nonce: 0u64,
         };
         let (nonce, block_hash) = ProofOfWork::new_proof(&block).run();
 
