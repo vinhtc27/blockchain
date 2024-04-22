@@ -1,4 +1,6 @@
 pub mod blockchain;
+pub mod cli;
+pub mod wallet;
 
 use thiserror::Error;
 
@@ -16,15 +18,25 @@ pub enum Error {
         #[from]
         source: sled::transaction::TransactionError,
     },
-    #[error("Speedy error")]
-    SpeedyError {
+    #[error("Bincode error")]
+    BincodeError {
         #[from]
-        source: speedy::Error,
+        source: bincode::Error,
     },
     #[error("Hex error")]
     HexError {
         #[from]
         source: hex::FromHexError,
+    },
+    #[error("Base58 error")]
+    Base58Error {
+        #[from]
+        source: bs58::decode::Error,
+    },
+    #[error("Io error")]
+    IoError {
+        #[from]
+        source: std::io::Error,
     },
     #[error("Custom error")]
     CustomError(String),

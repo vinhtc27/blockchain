@@ -2,7 +2,8 @@ use std::collections::HashMap;
 
 use super::{
     block::Block,
-    transaction::{Transaction, TxInput, TxOutput},
+    transaction::Transaction,
+    tx::{TxInput, TxOutput},
 };
 
 use crate::{blockchain::proof::ProofOfWork, Error, Result};
@@ -234,7 +235,7 @@ impl BlockChainIterator {
             Some(bytes) => match Block::deserialize(&bytes) {
                 Ok(block) => {
                     self.current_hash = block.prevhash.clone();
-                    println!("Prev. hash: {:?}", hex::encode(&block.prevhash));
+                    println!("Prevhash: {:?}", hex::encode(&block.prevhash));
                     println!("Transactions: {:?}", &block.transactions);
                     println!("Hash: {:?}", hex::encode(&block.hash));
                     println!("PoW: {}", ProofOfWork::new_proof(&block).validate());

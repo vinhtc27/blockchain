@@ -62,9 +62,6 @@ impl<'a> ProofOfWork<'a> {
 
     pub(crate) fn validate(&self) -> bool {
         let data = self.init_data(self.block.nonce);
-        let mut hasher = Sha256::new();
-        hasher.update(&data);
-
-        BigInt::from_bytes_be(Sign::Plus, &hasher.finalize()) < self.target
+        BigInt::from_bytes_be(Sign::Plus, &Sha256::digest(data)) < self.target
     }
 }

@@ -1,9 +1,11 @@
+use serde_derive::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use speedy::{BigEndian, Readable, Writable};
 
 use crate::Result;
 
-#[derive(Debug, Clone, Readable, Writable)]
+use super::tx::{TxInput, TxOutput};
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Transaction {
     pub(crate) id: Vec<u8>,
     pub(crate) inputs: Vec<TxInput>,
@@ -12,7 +14,7 @@ pub struct Transaction {
 
 impl Transaction {
     fn serialize(&self) -> Result<Vec<u8>> {
-        Ok(self.write_to_vec_with_ctx(BigEndian::default())?)
+        Ok(bincode::serialize(&self)?)
     }
 
     pub(crate) fn set_id(&mut self) -> Result<()> {
@@ -38,7 +40,7 @@ impl Transaction {
             sig: data,
         };
         let tout = TxOutput {
-            value: 100,
+            value: 50, //? 50₿ to Satoshi Nakamoto
             pubkey: to,
         };
 
@@ -51,34 +53,5 @@ impl Transaction {
         tx.set_id()?;
 
         Ok(tx)
-    }
-}
-
-#[derive(Debug, Clone, Readable, Writable)]
-pub struct TxInput {
-    pub(crate) id: Vec<u8>,
-    pub(crate) out: i64,
-    pub(crate) sig: String,
-}
-
-impl TxInput {
-    pub(crate) fn can_unlock(&self, data: &str) -> bool {
-        self.sig == data
-    }
-}
-
-#[derive(Debug, Clone, Readable, Writable)]
-pub struct TxOutput {
-    pub(crate) value: u64,
-    pub(crate) pubkey: String,
-}
-
-impl TxOutput {
-    pub(crate) fn can_be_unlocked(&self, data: &str) -> bool {
-        self.pubkey == data
-    }
-
-    pub fn value(&self) -> u64 {
-        self.value
     }
 }

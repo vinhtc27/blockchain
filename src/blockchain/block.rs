@@ -1,11 +1,11 @@
 use super::{proof::ProofOfWork, transaction::Transaction};
 
+use serde_derive::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use speedy::{BigEndian, Readable, Writable};
 
 use crate::Result;
 
-#[derive(Readable, Writable)]
+#[derive(Debug, Serialize, Deserialize)]
 pub(crate) struct Block {
     pub(crate) transactions: Vec<Transaction>,
     pub(crate) prevhash: Vec<u8>,
@@ -44,13 +44,10 @@ impl<'a> Block {
     }
 
     pub(crate) fn serialize(&self) -> Result<Vec<u8>> {
-        Ok(self.write_to_vec_with_ctx(BigEndian::default())?)
+        Ok(bincode::serialize(&self)?)
     }
 
     pub(crate) fn deserialize(bytes: &'a [u8]) -> Result<Self> {
-        Ok(Self::read_from_buffer_with_ctx(
-            BigEndian::default(),
-            bytes,
-        )?)
+        Ok(bincode::deserialize(bytes)?)
     }
 }
