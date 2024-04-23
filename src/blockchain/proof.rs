@@ -22,15 +22,6 @@ pub(crate) struct ProofOfWork<'a> {
 }
 
 impl<'a> ProofOfWork<'a> {
-    fn init_data(&self, nonce: u64) -> Vec<u8> {
-        let mut data = vec![];
-        data.extend_from_slice(&self.block.prevhash);
-        data.extend_from_slice(&self.block.hash_transactions());
-        data.extend_from_slice(&nonce.to_be_bytes());
-        data.extend_from_slice(&DIFFICULTY.to_be_bytes());
-        data
-    }
-
     pub(crate) fn new_proof(block: &'a Block) -> Self {
         let target = BigInt::from(1u64);
         let target = target << (256 - DIFFICULTY);
@@ -62,5 +53,14 @@ impl<'a> ProofOfWork<'a> {
     pub(crate) fn validate(&self) -> bool {
         let data = self.init_data(self.block.nonce);
         BigInt::from_bytes_be(Sign::Plus, &Sha256::digest(data)) < self.target
+    }
+
+    fn init_data(&self, nonce: u64) -> Vec<u8> {
+        let mut data = vec![];
+        data.extend_from_slice(&self.block.prevhash);
+        data.extend_from_slice(&self.block.hash_transactions());
+        data.extend_from_slice(&nonce.to_be_bytes());
+        data.extend_from_slice(&DIFFICULTY.to_be_bytes());
+        data
     }
 }

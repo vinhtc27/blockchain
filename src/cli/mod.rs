@@ -1,6 +1,6 @@
 use crate::{
-    blockchain::BlockChain,
-    wallet::{validate_address, Wallets},
+    blockchain::{BlockChain, Transaction, UTXOSet},
+    wallet::Wallets,
     Error, Result,
 };
 use std::{env, fmt, process, str::FromStr};
@@ -51,54 +51,57 @@ impl CommandLine {
             Command::PrintBlockchain => self.print_blockchain()?,
             Command::CreateWallet => self.create_wallet()?,
             Command::ListAddresses => self.list_addresses()?,
+            Command::ReindexUTXO => self.reindex_utxo()?,
         }
+
+        println!();
         Ok(())
     }
 
     fn create_blockchain(&self, address: &str) -> Result<()> {
-        if !validate_address(address)? {
-            return Err(Error::CustomError(
-                "Invalid address (create_blockchain)".to_owned(),
-            ));
-        }
-        let _ = BlockChain::init_blockchain(address)?;
-        println!("Blockchain created!");
+        let mut wallets = Wallets::create_wallets()?;
+        wallets
+            .get_wallet(address)?
+            .expect("Address doesn't exists!");
 
+        let chain = BlockChain::init_blockchain(address)?;
+        println!("Blockchain created");
+
+        let utxo_set = UTXOSet::new(&chain);
+        utxo_set.reindex()?;
+
+        println!();
         Ok(())
     }
 
     fn send_coin(&self, from: &str, to: &str, amount: u64) -> Result<()> {
-        if !validate_address(from)? || !validate_address(to)? {
-            return Err(Error::CustomError("Invalid address (send_coin)".to_owned()));
-        }
+        let mut wallets = Wallets::create_wallets()?;
+        wallets.get_wallet(from)?.expect("Address doesn't exists!");
+        wallets.get_wallet(to)?.expect("Address doesn't exists!");
 
-        let mut chain = BlockChain::continue_blockchain()?;
+        let chain = &mut BlockChain::continue_blockchain()?;
+        let utxo_set = UTXOSet::new(&chain);
+        chain.add_block(vec![Transaction::new(from, to, amount, &utxo_set)?])?;
+        println!("Send from {from} -> {to} success");
 
-        let tx = chain.new_transaction(from, to, amount)?;
-        chain.add_block(vec![tx])?;
-
-        println!("Send from {} -> {} success!", from, to);
-
+        println!();
         Ok(())
     }
 
     fn get_balance(&self, address: &str) -> Result<()> {
-        if !validate_address(address)? {
-            return Err(Error::CustomError(
-                "Invalid address (get_balance)".to_owned(),
-            ));
-        }
-
         let chain = BlockChain::continue_blockchain()?;
-        let mut balance = 0u64;
 
-        let utxos = chain.find_utxo(address)?; //? UTXOs: Unspent Transaction Outputs
-        for output in utxos {
-            balance += output.value
-        }
+        let mut wallets = Wallets::create_wallets()?;
+        wallets
+            .get_wallet(address)?
+            .expect("Address doesn't exists!");
 
-        println!("Balance of {}: {}", address, balance);
+        let utxo_set = UTXOSet::new(&chain);
+        let balance = utxo_set.get_balance(address)?;
 
+        println!("Balance of {address}: {balance}");
+
+        println!();
         Ok(())
     }
 
@@ -106,9 +109,10 @@ impl CommandLine {
         let chain = BlockChain::continue_blockchain()?;
         let mut iter = chain.iterator();
 
-        println!("Print blockchain");
+        println!("Blockchain info");
         while iter.next_print()?.is_some() {}
 
+        println!();
         Ok(())
     }
 
@@ -117,21 +121,34 @@ impl CommandLine {
         let address = wallets.add_wallet();
         wallets.save_file()?;
 
-        println!("New wallet address {:?}", address);
+        println!("create_wallet:{:?}", address);
+
+        println!();
         Ok(())
     }
 
     fn list_addresses(&self) -> Result<()> {
         let wallets = Wallets::create_wallets()?;
-        let addresses = wallets.get_addresses();
-        wallets.save_file()?;
+        let addresses = wallets.list_addresses();
 
-        println!("Addresses");
+        println!("List addresses");
         for address in addresses {
-            println!("{}", address);
+            println!("{address}");
         }
-        println!();
 
+        println!();
+        Ok(())
+    }
+
+    fn reindex_utxo(&self) -> Result<()> {
+        let chain = BlockChain::continue_blockchain()?;
+        let utxo_set = UTXOSet::new(&chain);
+        utxo_set.reindex()?;
+
+        let count = utxo_set.count_transaction();
+        println!("Reindex UTXO set with {count} transaction");
+
+        println!();
         Ok(())
     }
 }
@@ -143,6 +160,7 @@ enum Command {
     PrintBlockchain,
     CreateWallet,
     ListAddresses,
+    ReindexUTXO,
 }
 
 impl FromStr for Command {
@@ -155,6 +173,7 @@ impl FromStr for Command {
             "print_blockchain" => Ok(Command::PrintBlockchain),
             "create_wallet" => Ok(Command::CreateWallet),
             "list_addresses" => Ok(Command::ListAddresses),
+            "reindex_utxo" => Ok(Command::ReindexUTXO),
             _ => {
                 println!("Invalid command!\n");
                 print_usage_and_exit();
@@ -173,13 +192,13 @@ impl fmt::Display for Command {
             Command::PrintBlockchain => write!(f, "print_blockchain"),
             Command::CreateWallet => write!(f, "create_wallet"),
             Command::ListAddresses => write!(f, "list_addresses"),
+            Command::ReindexUTXO => write!(f, "reindex_utxo"),
         }
     }
 }
 
 fn print_usage_and_exit() {
-    println!("Usage:");
-    //? blockchain
+    println!("USAGE:");
     println!(
         " {} ADDRESS (str) - init blockchain and send genesis reward to ADDRESS",
         Command::CreateBlockchain
@@ -196,9 +215,8 @@ fn print_usage_and_exit() {
         " {} - show all the blocks in the blockchain",
         Command::PrintBlockchain
     );
-
-    //? wallet
     println!(" {} - create a new wallet", Command::CreateWallet);
     println!(" {} - list all the addresses", Command::ListAddresses);
+    println!(" {} - rebuild the UTXO set", Command::ReindexUTXO);
     process::exit(0);
 }

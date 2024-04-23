@@ -4,9 +4,12 @@ use p256::ecdsa::{signature::Verifier, Signature, VerifyingKey};
 use serde_derive::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-use crate::{wallet::WalletPrivateKey, Error, Result};
+use crate::{wallet::Wallets, Error, Result};
 
-use super::tx::{TxInput, TxOutput};
+use super::{
+    tx::{TxInput, TxOutput},
+    utxo::UTXOSet,
+};
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Transaction {
@@ -31,35 +34,36 @@ impl Transaction {
 
     pub(crate) fn sign(
         &mut self,
-        private_key: &mut WalletPrivateKey,
+        address: &str,
         prev_txs: &HashMap<String, Transaction>,
     ) -> Result<()> {
         if self.is_coinbase() {
             return Ok(());
         }
 
-        for input in &self.inputs {
-            let prev_tx = prev_txs.get(&hex::encode(&input.id));
+        for tx_input in &self.inputs {
+            let prev_tx = prev_txs.get(&hex::encode(&tx_input.id));
             if prev_tx.is_none() || prev_tx.unwrap().id.is_empty() {
                 return Err(Error::CustomError(
-                    "Previous transaction does not exist (sign)".to_owned(),
+                    "Previous transaction does not exist!".to_owned(),
                 ));
             }
         }
 
-        let mut tx_copy = self.trimmed_copy();
+        let mut tx_copy = self.trimmed_copy()?;
         let tx_copy_inputs: Vec<_> = tx_copy.inputs.clone();
         for (in_index, tx_input) in tx_copy_inputs.iter().enumerate() {
             let prev_tx = prev_txs.get(&hex::encode(&tx_input.id)).unwrap();
             tx_copy.inputs[in_index].signature = vec![];
-            tx_copy.inputs[in_index].public_key = prev_tx.outputs[tx_input.out as usize]
+            tx_copy.inputs[in_index].public_key_hash = prev_tx.outputs[tx_input.out as usize]
                 .public_key_hash
                 .clone();
 
             tx_copy.hash()?;
-            tx_copy.inputs[in_index].public_key = vec![];
+            tx_copy.inputs[in_index].public_key_hash = vec![];
 
-            let signature: Signature = private_key.sign(&tx_copy.id);
+            let mut wallets = Wallets::create_wallets()?;
+            let signature: Signature = wallets.sign_tx(&tx_copy.id, address)?;
             self.inputs[in_index].signature = signature.to_vec();
         }
 
@@ -71,28 +75,28 @@ impl Transaction {
             return Ok(true);
         }
 
-        for input in self.inputs.iter() {
-            let prev_tx = prev_txs.get(&hex::encode(&input.id));
+        for tx_input in self.inputs.iter() {
+            let prev_tx = prev_txs.get(&hex::encode(&tx_input.id));
             if prev_tx.is_none() || prev_tx.unwrap().id == vec![] {
                 return Err(Error::CustomError(
-                    "Previous transaction does not exists (verify)".to_owned(),
+                    "Previous transaction doesn't exists!".to_owned(),
                 ));
             }
         }
 
-        let mut tx_copy = self.trimmed_copy();
+        let mut tx_copy = self.trimmed_copy()?;
         let tx_copy_inputs: Vec<_> = tx_copy.inputs.clone();
         for (in_index, tx_input) in tx_copy_inputs.iter().enumerate() {
             let prev_tx = prev_txs.get(&hex::encode(&tx_input.id)).unwrap();
             tx_copy.inputs[in_index].signature = vec![];
-            tx_copy.inputs[in_index].public_key = prev_tx.outputs[tx_input.out as usize]
+            tx_copy.inputs[in_index].public_key_hash = prev_tx.outputs[tx_input.out as usize]
                 .public_key_hash
                 .clone();
 
             tx_copy.hash()?;
-            tx_copy.inputs[in_index].public_key = vec![];
+            tx_copy.inputs[in_index].public_key_hash = vec![];
 
-            let public_key = VerifyingKey::from_sec1_bytes(&tx_input.public_key)?;
+            let public_key = VerifyingKey::from_sec1_bytes(&tx_input.public_key_hash)?;
             let signature = Signature::from_der(&tx_input.signature)?;
 
             if public_key.verify(&tx_copy.id, &signature).is_err() {
@@ -103,19 +107,9 @@ impl Transaction {
         Ok(true)
     }
 
-    pub(crate) fn coinbase_tx(to: &str, mut data: String) -> Result<Self> {
-        if data.is_empty() {
-            data = format!("Coin to {}", to);
-        }
-
-        let tx_input = TxInput {
-            id: vec![],
-            out: -1,
-            signature: vec![],
-            public_key: data.as_bytes().to_vec(),
-        };
-
-        let tx_ouput = TxOutput::new(50, to)?; //? 50₿ to Satoshi Nakamoto
+    pub(crate) fn genesis(to: &str) -> Result<Self> {
+        let tx_input = TxInput::new(vec![], -1, vec![], "Genesis")?;
+        let tx_ouput = TxOutput::new(50, to)?;
 
         let mut tx = Transaction {
             id: vec![],
@@ -128,31 +122,61 @@ impl Transaction {
         Ok(tx)
     }
 
-    fn trimmed_copy(&self) -> Self {
+    pub fn new(from: &str, to: &str, amount: u64, utxo_set: &UTXOSet) -> Result<Transaction> {
         let mut inputs = vec![];
         let mut outputs = vec![];
 
-        for input in self.inputs.iter() {
-            inputs.push(TxInput {
-                id: input.id.clone(),
-                out: input.out,
-                signature: vec![],
-                public_key: vec![],
-            })
+        let (accumulated, valid_ouputs) = utxo_set.find_address_unspent_outputs(from, amount)?;
+
+        if accumulated < amount {
+            return Err(Error::CustomError("Not enough funds".to_owned()));
         }
 
-        for output in self.outputs.iter() {
+        for (tx_id, outs) in valid_ouputs {
+            let tx_id = hex::decode(&tx_id)?;
+
+            for out in outs {
+                inputs.push(TxInput::new(tx_id.clone(), out, vec![], from)?);
+            }
+        }
+
+        outputs.push(TxOutput::new(amount, to)?);
+        if accumulated > amount {
+            outputs.push(TxOutput::new(accumulated - amount, from)?)
+        }
+
+        let mut tx = Transaction {
+            id: vec![],
+            inputs,
+            outputs,
+        };
+        tx.hash()?;
+
+        utxo_set.chain.sign_transaction(&mut tx, from)?;
+
+        Ok(tx)
+    }
+
+    fn trimmed_copy(&self) -> Result<Self> {
+        let mut inputs = vec![];
+        let mut outputs = vec![];
+
+        for tx_input in self.inputs.iter() {
+            inputs.push(TxInput::new(tx_input.id.clone(), tx_input.out, vec![], "")?)
+        }
+
+        for tx_output in self.outputs.iter() {
             outputs.push(TxOutput {
-                value: output.value,
-                public_key_hash: output.public_key_hash.clone(),
+                value: tx_output.value,
+                public_key_hash: tx_output.public_key_hash.clone(),
             })
         }
 
-        Self {
+        Ok(Self {
             id: self.id.clone(),
             inputs,
             outputs,
-        }
+        })
     }
 }
 
@@ -160,7 +184,7 @@ impl fmt::Display for Transaction {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let mut tx: String = "".to_owned();
 
-        tx.push_str(&format!("--- Transaction: {:?}\n", hex::encode(&self.id)));
+        tx.push_str(&format!(" # Id: {:?}\n", hex::encode(&self.id)));
         for (in_index, tx_input) in self.inputs.iter().enumerate() {
             tx.push_str(&format!(" + Input - index: {:?}\n", in_index));
             tx.push_str(&format!("         - id: {:?}\n", hex::encode(&tx_input.id)));
@@ -170,8 +194,8 @@ impl fmt::Display for Transaction {
                 hex::encode(&tx_input.signature)
             ));
             tx.push_str(&format!(
-                "         - public_key: {:?}\n",
-                hex::encode(&tx_input.public_key)
+                "         - public_key_hash: {:?}\n",
+                hex::encode(&tx_input.public_key_hash)
             ));
         }
         tx.push_str(" \n");
@@ -183,7 +207,8 @@ impl fmt::Display for Transaction {
                 hex::encode(&tx_output.public_key_hash)
             ));
         }
+        tx.push_str(" \n");
 
-        write!(f, "{}", tx)
+        write!(f, "{tx}")
     }
 }

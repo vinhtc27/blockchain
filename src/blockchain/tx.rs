@@ -1,63 +1,76 @@
 use serde_derive::{Deserialize, Serialize};
 
-use crate::{
-    wallet::{hash_public_key, CHECKSUM_LENGTH},
-    Result,
-};
+use crate::{wallet::public_key_hash_from_address, Result};
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct TxInput {
+pub(crate) struct TxInput {
     pub(crate) id: Vec<u8>,
     pub(crate) out: i64,
     pub(crate) signature: Vec<u8>,
-    pub(crate) public_key: Vec<u8>,
+    pub(crate) public_key_hash: Vec<u8>,
 }
 
 impl TxInput {
-    pub(crate) fn uses_key(&self, public_key_hash: &[u8]) -> bool {
-        let locking_hash = hash_public_key(&self.public_key);
-        locking_hash == public_key_hash
+    pub(crate) fn new(id: Vec<u8>, out: i64, signature: Vec<u8>, address: &str) -> Result<Self> {
+        let public_key_hash = if address.is_empty() {
+            vec![]
+        } else {
+            public_key_hash_from_address(address)?
+        };
+
+        Ok(Self {
+            id,
+            out,
+            signature,
+            public_key_hash,
+        })
+    }
+
+    pub(crate) fn uses_key(&self, address: &str) -> Result<bool> {
+        let public_key_hash = public_key_hash_from_address(address)?;
+
+        Ok(self.public_key_hash == public_key_hash)
     }
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct TxOutput {
+pub(crate) struct TxOutput {
     pub(crate) value: u64,
     pub(crate) public_key_hash: Vec<u8>,
 }
 
 impl TxOutput {
-    pub(crate) fn new(value: u64, to: &str) -> Result<Self> {
-        let public_key_hash: Vec<u8> = bs58::decode(to).into_vec()?;
+    pub(crate) fn new(value: u64, address: &str) -> Result<Self> {
+        let public_key_hash = public_key_hash_from_address(address)?;
 
-        let mut tx_output = Self {
+        Ok(Self {
             value,
-            public_key_hash: vec![],
-        };
-        tx_output.lock(&public_key_hash);
-
-        Ok(tx_output)
+            public_key_hash,
+        })
     }
 
-    fn lock(&mut self, public_key_hash: &[u8]) {
-        let public_key_hash: Vec<u8> = public_key_hash
-            .iter()
-            .skip(1)
-            .copied()
-            .take(public_key_hash.len() - CHECKSUM_LENGTH - 1)
-            .clone()
-            .collect();
-        self.public_key_hash = public_key_hash
-    }
-
-    pub(crate) fn is_locked_with_key(&self, public_key_hash: &[u8]) -> Result<bool> {
-        let public_key_hash: Vec<u8> = public_key_hash
-            .iter()
-            .skip(1)
-            .copied()
-            .take(public_key_hash.len() - CHECKSUM_LENGTH - 1)
-            .collect();
+    pub(crate) fn is_locked_with_key(&self, address: &str) -> Result<bool> {
+        let public_key_hash = public_key_hash_from_address(address)?;
 
         Ok(self.public_key_hash == public_key_hash)
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub(crate) struct TxOutputs {
+    pub(crate) outputs: Vec<TxOutput>,
+}
+
+impl<'a> TxOutputs {
+    pub(crate) fn new() -> Self {
+        Self { outputs: vec![] }
+    }
+
+    pub(crate) fn serialize(&self) -> Result<Vec<u8>> {
+        Ok(bincode::serialize(&self)?)
+    }
+
+    pub(crate) fn deserialize(bytes: &'a [u8]) -> Result<Self> {
+        Ok(bincode::deserialize(bytes)?)
     }
 }

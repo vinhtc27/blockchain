@@ -1,5 +1,6 @@
 #![allow(clippy::module_inception)]
 #![allow(rust_2018_idioms)]
+#![allow(dead_code)]
 #![deny(unsafe_code)]
 
 pub mod blockchain;

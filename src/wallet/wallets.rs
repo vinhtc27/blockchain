@@ -1,3 +1,4 @@
+use p256::ecdsa::Signature;
 use serde_derive::{Deserialize, Serialize};
 use std::{
     collections::HashMap,
@@ -6,9 +7,9 @@ use std::{
     path::Path,
 };
 
-use crate::Result;
+use crate::{Error, Result};
 
-use super::wallet::Wallet;
+use super::{validate_address, wallet::Wallet};
 
 static WALLET_PATH: &str = "./tmp/wallet";
 static WALLET_FILE: &str = "./tmp/wallet/wallets.data";
@@ -31,6 +32,7 @@ impl Wallets {
         } else {
             create_dir_all(WALLET_PATH)?;
             File::create(WALLET_FILE)?;
+            wallets.save_file()?;
         }
         Ok(wallets)
     }
@@ -42,11 +44,15 @@ impl Wallets {
         address
     }
 
-    pub fn get_wallet(&mut self, address: &str) -> Option<&mut Wallet> {
-        self.wallets.get_mut(address)
+    pub fn get_wallet(&mut self, address: &str) -> Result<Option<&mut Wallet>> {
+        if !validate_address(address)? {
+            return Err(Error::CustomError("Address is invalid!".to_owned()));
+        };
+
+        Ok(self.wallets.get_mut(address))
     }
 
-    pub fn get_addresses(&self) -> Vec<String> {
+    pub fn list_addresses(&self) -> Vec<String> {
         self.wallets.keys().cloned().collect()
     }
 
@@ -56,8 +62,15 @@ impl Wallets {
             .create(true)
             .truncate(true)
             .open(WALLET_FILE)?;
+
         let encoded = bincode::serialize(&self.wallets)?;
         file.write_all(&encoded)?;
         Ok(())
+    }
+
+    pub fn sign_tx(&mut self, tx_id: &[u8], address: &str) -> Result<Signature> {
+        self.get_wallet(address)?
+            .expect("Wallet doesn't exists!")
+            .sign(tx_id)
     }
 }
