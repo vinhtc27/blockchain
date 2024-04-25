@@ -1,4 +1,4 @@
-use p256::ecdsa::Signature;
+use secp256k1::ecdsa::Signature;
 use serde_derive::{Deserialize, Serialize};
 use std::{
     collections::HashMap,
@@ -37,19 +37,24 @@ impl Wallets {
         Ok(wallets)
     }
 
-    pub fn add_wallet(&mut self) -> String {
-        let wallet = Wallet::default();
+    pub fn add_wallet(&mut self) -> Result<String> {
+        let wallet = Wallet::new()?;
         let address = wallet.address();
         self.wallets.insert(address.clone(), wallet);
-        address
+
+        Ok(address)
     }
 
     pub fn get_wallet(&mut self, address: &str) -> Result<Option<&mut Wallet>> {
         if !validate_address(address)? {
-            return Err(Error::CustomError("Address is invalid!".to_owned()));
+            return Err(Error::CustomError("Wallet is invalid!".to_owned()));
         };
 
-        Ok(self.wallets.get_mut(address))
+        if let Some(wallet) = self.wallets.get_mut(address) {
+            Ok(Some(wallet))
+        } else {
+            Err(Error::CustomError("Address doesn't exists!".to_owned()))
+        }
     }
 
     pub fn list_addresses(&self) -> Vec<String> {

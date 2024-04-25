@@ -2,7 +2,7 @@ use serde_derive::{Deserialize, Serialize};
 
 use crate::{wallet::public_key_hash_from_address, Result};
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Serialize, Deserialize, Clone)]
 pub(crate) struct TxInput {
     pub(crate) id: Vec<u8>,
     pub(crate) out: i64,
@@ -11,25 +11,13 @@ pub(crate) struct TxInput {
 }
 
 impl TxInput {
-    pub(crate) fn new(id: Vec<u8>, out: i64, signature: Vec<u8>, address: &str) -> Result<Self> {
-        let public_key_hash = if address.is_empty() {
-            vec![]
-        } else {
-            public_key_hash_from_address(address)?
-        };
-
+    pub(crate) fn new(id: Vec<u8>, out: i64, signature: Vec<u8>, data: Vec<u8>) -> Result<Self> {
         Ok(Self {
             id,
             out,
             signature,
-            public_key_hash,
+            public_key_hash: data,
         })
-    }
-
-    pub(crate) fn uses_key(&self, address: &str) -> Result<bool> {
-        let public_key_hash = public_key_hash_from_address(address)?;
-
-        Ok(self.public_key_hash == public_key_hash)
     }
 }
 

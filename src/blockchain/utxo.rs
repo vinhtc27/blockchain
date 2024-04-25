@@ -13,12 +13,12 @@ use crate::Result;
 static UTXO_PREFIX: &[u8] = "utxo-".as_bytes();
 static BATCH_SIZE: usize = 100000;
 
-pub struct UTXOSet<'a> {
-    pub(crate) chain: &'a BlockChain,
+pub struct UTXOSet {
+    pub(crate) chain: BlockChain,
 }
 
-impl<'a> UTXOSet<'a> {
-    pub fn new(chain: &'a BlockChain) -> Self {
+impl UTXOSet {
+    pub fn new(chain: BlockChain) -> Self {
         Self { chain }
     }
 
@@ -41,30 +41,16 @@ impl<'a> UTXOSet<'a> {
         self.chain.database.scan_prefix(UTXO_PREFIX).count()
     }
 
-    pub fn get_balance(&self, address: &str) -> Result<u64> {
-        let address_utxo = self.find_address_utxo(address)?;
-
-        let mut balance = 0u64;
-        for utxo in address_utxo {
-            if utxo.is_locked_with_key(address)? {
-                balance += utxo.value
-            }
-        }
-
-        Ok(balance)
-    }
-
-    fn update(&self, block: Block) -> Result<()> {
+    pub fn update(&self, block: &Block) -> Result<()> {
         self.chain.database.transaction(|db| {
             for tx in block.transactions.iter() {
                 if !tx.is_coinbase() {
                     for tx_input in tx.inputs.iter() {
                         let mut update_tx_outputs = TxOutputs::new();
-                        let mut input_id = UTXO_PREFIX.to_vec();
-                        input_id.extend_from_slice(&tx_input.id);
+                        let mut tx_id = UTXO_PREFIX.to_vec();
+                        tx_id.extend_from_slice(&tx_input.id);
 
-                        let tx_outputs =
-                            TxOutputs::deserialize(&db.get(&input_id)?.unwrap()).unwrap();
+                        let tx_outputs = TxOutputs::deserialize(&db.get(&tx_id)?.unwrap()).unwrap();
 
                         for (out_index, tx_output) in tx_outputs.outputs.into_iter().enumerate() {
                             if out_index != tx_input.out as usize {
@@ -73,12 +59,13 @@ impl<'a> UTXOSet<'a> {
                         }
 
                         if update_tx_outputs.outputs.is_empty() {
-                            db.remove(input_id)?;
+                            db.remove(tx_id)?;
                         } else {
-                            db.insert(input_id, update_tx_outputs.serialize().unwrap())?;
+                            db.insert(tx_id, update_tx_outputs.serialize().unwrap())?;
                         }
                     }
                 }
+
                 let mut new_tx_outputs = TxOutputs::new();
                 for out in tx.outputs.iter() {
                     new_tx_outputs.outputs.push(out.clone());
@@ -95,12 +82,11 @@ impl<'a> UTXOSet<'a> {
         Ok(())
     }
 
-    fn find_address_utxo(&self, address: &str) -> Result<Vec<TxOutput>> {
+    pub fn get_balance(&self, address: &str) -> Result<u64> {
         let mut address_utxo: Vec<TxOutput> = vec![];
 
-        for item in self.chain.database.scan_prefix(UTXO_PREFIX) {
-            let (_, value) = item?;
-            let tx_outputs = TxOutputs::deserialize(&value)?;
+        for bytes in self.chain.database.scan_prefix(UTXO_PREFIX).values() {
+            let tx_outputs = TxOutputs::deserialize(&bytes?)?;
             for tx_output in tx_outputs.outputs {
                 if tx_output.is_locked_with_key(address)? {
                     address_utxo.push(tx_output)
@@ -108,7 +94,14 @@ impl<'a> UTXOSet<'a> {
             }
         }
 
-        Ok(address_utxo)
+        let mut balance = 0u64;
+        for utxo in address_utxo {
+            if utxo.is_locked_with_key(address)? {
+                balance += utxo.value
+            }
+        }
+
+        Ok(balance)
     }
 
     pub(crate) fn find_address_unspent_outputs(
@@ -120,15 +113,22 @@ impl<'a> UTXOSet<'a> {
         let mut accumulated = 0;
 
         for item in self.chain.database.scan_prefix(UTXO_PREFIX) {
-            let (key, value) = item?;
-            let tx_id = hex::encode(key.to_vec().drain(..UTXO_PREFIX.len()).collect::<Vec<_>>());
-            let tx_outputs = TxOutputs::deserialize(&value)?;
+            let (key, bytes) = item?;
+
+            let tx_id = hex::encode(
+                key.iter()
+                    .copied()
+                    .skip(UTXO_PREFIX.len())
+                    .collect::<Vec<u8>>(),
+            );
+
+            let tx_outputs = TxOutputs::deserialize(&bytes)?;
             for (out_index, tx_output) in tx_outputs.outputs.iter().enumerate() {
                 if tx_output.is_locked_with_key(address)? && accumulated < amount {
                     accumulated += tx_output.value;
                     unspent_outputs
                         .entry(tx_id.clone())
-                        .or_default()
+                        .or_insert(vec![])
                         .push(out_index as i64);
                 }
             }
@@ -156,7 +156,7 @@ impl<'a> UTXOSet<'a> {
 
         self.chain.database.transaction(|db| {
             for batch in batchs.iter() {
-                db.apply_batch(&batch)?;
+                db.apply_batch(batch)?;
             }
             Ok(())
         })?;

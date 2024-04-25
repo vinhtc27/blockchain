@@ -37,7 +37,7 @@ impl CommandLine {
                 let amount = match self.args[3].parse::<u64>() {
                     Ok(amount) => amount,
                     Err(_) => {
-                        return Err(Error::CustomError("send amount must be integer".to_owned()))
+                        return Err(Error::CustomError("Amount must be an integer".to_owned()))
                     }
                 };
                 self.send_coin(&self.args[1], &self.args[2], amount)?;
@@ -60,14 +60,12 @@ impl CommandLine {
 
     fn create_blockchain(&self, address: &str) -> Result<()> {
         let mut wallets = Wallets::create_wallets()?;
-        wallets
-            .get_wallet(address)?
-            .expect("Address doesn't exists!");
+        wallets.get_wallet(address)?;
 
         let chain = BlockChain::init_blockchain(address)?;
         println!("Blockchain created");
 
-        let utxo_set = UTXOSet::new(&chain);
+        let utxo_set = UTXOSet::new(chain);
         utxo_set.reindex()?;
 
         println!();
@@ -76,13 +74,18 @@ impl CommandLine {
 
     fn send_coin(&self, from: &str, to: &str, amount: u64) -> Result<()> {
         let mut wallets = Wallets::create_wallets()?;
-        wallets.get_wallet(from)?.expect("Address doesn't exists!");
-        wallets.get_wallet(to)?.expect("Address doesn't exists!");
+        wallets.get_wallet(from)?;
+        wallets.get_wallet(to)?;
 
-        let chain = &mut BlockChain::continue_blockchain()?;
-        let utxo_set = UTXOSet::new(&chain);
-        chain.add_block(vec![Transaction::new(from, to, amount, &utxo_set)?])?;
-        println!("Send from {from} -> {to} success");
+        let mut chain = BlockChain::continue_blockchain()?;
+        let utxo_set = UTXOSet::new(chain.clone());
+
+        let tx = Transaction::new(from, to, amount, &utxo_set)?;
+        let coinbase_tx = Transaction::coinbase_tx(from)?;
+
+        let block = chain.add_block(vec![coinbase_tx, tx])?;
+        utxo_set.update(&block)?;
+        println!("Send {amount} coin | {from} -> {to}");
 
         println!();
         Ok(())
@@ -92,11 +95,9 @@ impl CommandLine {
         let chain = BlockChain::continue_blockchain()?;
 
         let mut wallets = Wallets::create_wallets()?;
-        wallets
-            .get_wallet(address)?
-            .expect("Address doesn't exists!");
+        wallets.get_wallet(address)?;
 
-        let utxo_set = UTXOSet::new(&chain);
+        let utxo_set = UTXOSet::new(chain);
         let balance = utxo_set.get_balance(address)?;
 
         println!("Balance of {address}: {balance}");
@@ -109,7 +110,7 @@ impl CommandLine {
         let chain = BlockChain::continue_blockchain()?;
         let mut iter = chain.iterator();
 
-        println!("Blockchain info");
+        println!("Blockchain Info\n");
         while iter.next_print()?.is_some() {}
 
         println!();
@@ -118,10 +119,10 @@ impl CommandLine {
 
     fn create_wallet(&self) -> Result<()> {
         let mut wallets = Wallets::create_wallets()?;
-        let address = wallets.add_wallet();
+        let address = wallets.add_wallet()?;
         wallets.save_file()?;
 
-        println!("create_wallet:{:?}", address);
+        println!("Wallet: {}", address);
 
         println!();
         Ok(())
@@ -142,7 +143,7 @@ impl CommandLine {
 
     fn reindex_utxo(&self) -> Result<()> {
         let chain = BlockChain::continue_blockchain()?;
-        let utxo_set = UTXOSet::new(&chain);
+        let utxo_set = UTXOSet::new(chain);
         utxo_set.reindex()?;
 
         let count = utxo_set.count_transaction();

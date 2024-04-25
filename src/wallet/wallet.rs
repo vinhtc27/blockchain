@@ -1,10 +1,8 @@
 use rand::rngs::OsRng;
-use ripemd::{Digest, Ripemd160};
+use secp256k1::{ecdsa::Signature, rand, Message, PublicKey, Secp256k1, SecretKey};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use serde_derive::{Deserialize, Serialize};
-use sha2::Sha256;
-
-use p256::ecdsa::{signature::SignerMut, Signature, SigningKey, VerifyingKey};
+use sha2::{Digest, Sha256};
 
 use crate::Result;
 
@@ -14,26 +12,25 @@ static VERSION: u8 = 0x00;
 #[derive(Serialize, Deserialize)]
 pub struct Wallet {
     private_key: WalletPrivateKey,
-    public_key: Vec<u8>,
-}
-
-impl Default for Wallet {
-    fn default() -> Self {
-        let signing_key = SigningKey::random(&mut OsRng);
-        let verifying_key = VerifyingKey::from(&signing_key);
-        Self {
-            private_key: WalletPrivateKey(signing_key),
-            public_key: verifying_key.to_sec1_bytes().to_vec(),
-        }
-    }
+    public_key: WalletPublicKey,
 }
 
 impl Wallet {
+    pub(crate) fn new() -> Result<Self> {
+        let secp = Secp256k1::new();
+        let (secret_key, public_key) = secp.generate_keypair(&mut OsRng);
+
+        Ok(Self {
+            private_key: WalletPrivateKey(secret_key),
+            public_key: WalletPublicKey(public_key),
+        })
+    }
+
     pub(crate) fn address(&self) -> String {
-        let public_key_hash = hash_public_key(&self.public_key);
+        let public_key_hash = &self.public_key.0.serialize().to_vec();
 
         let mut full_hash = vec![VERSION];
-        full_hash.extend_from_slice(&public_key_hash);
+        full_hash.extend_from_slice(public_key_hash);
 
         let checksum = checksum(&full_hash);
         full_hash.extend_from_slice(&checksum);
@@ -41,8 +38,12 @@ impl Wallet {
         bs58::encode(&full_hash).into_string()
     }
 
-    pub(crate) fn sign(&mut self, tx_id: &[u8]) -> Result<Signature> {
-        Ok(self.private_key.0.sign(tx_id))
+    pub(crate) fn sign(&self, tx_id: &[u8]) -> Result<Signature> {
+        let secp = Secp256k1::new();
+        let digest = Sha256::digest(tx_id);
+        let message = Message::from_digest(digest.into());
+
+        Ok(secp.sign_ecdsa(&message, &self.private_key.0))
     }
 }
 
@@ -85,20 +86,13 @@ pub fn validate_address(address: &str) -> Result<bool> {
     Ok(actual_checksum == tartget_checksum)
 }
 
-fn hash_public_key(public_key: &[u8]) -> Vec<u8> {
-    let public_key_hash_sha256 = Sha256::digest(public_key);
-    let public_key_hash_ripemd160 = Ripemd160::digest(public_key_hash_sha256);
-
-    public_key_hash_ripemd160.to_vec()
-}
-
 fn checksum(payload: &[u8]) -> Vec<u8> {
     let first_hash = Sha256::digest(payload);
     let second_hash = Sha256::digest(first_hash);
     second_hash.into_iter().take(CHECKSUM_LENGTH).collect()
 }
 
-pub struct WalletPrivateKey(SigningKey);
+struct WalletPrivateKey(SecretKey);
 
 impl<'de> Deserialize<'de> for WalletPrivateKey {
     fn deserialize<D>(deserializer: D) -> core::result::Result<Self, D::Error>
@@ -106,7 +100,7 @@ impl<'de> Deserialize<'de> for WalletPrivateKey {
         D: Deserializer<'de>,
     {
         let bytes = <&[u8]>::deserialize(deserializer)?;
-        SigningKey::from_slice(bytes)
+        SecretKey::from_slice(bytes)
             .map(WalletPrivateKey)
             .map_err(|e| serde::de::Error::custom(e.to_string()))
     }
@@ -117,7 +111,31 @@ impl Serialize for WalletPrivateKey {
     where
         S: Serializer,
     {
-        let encoded = self.0.to_bytes();
+        let encoded = self.0.secret_bytes();
+        serializer.serialize_bytes(&encoded)
+    }
+}
+
+struct WalletPublicKey(PublicKey);
+
+impl<'de> Deserialize<'de> for WalletPublicKey {
+    fn deserialize<D>(deserializer: D) -> core::result::Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let bytes = <&[u8]>::deserialize(deserializer)?;
+        PublicKey::from_slice(bytes)
+            .map(WalletPublicKey)
+            .map_err(|e| serde::de::Error::custom(e.to_string()))
+    }
+}
+
+impl Serialize for WalletPublicKey {
+    fn serialize<S>(&self, serializer: S) -> core::result::Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let encoded = self.0.serialize();
         serializer.serialize_bytes(&encoded)
     }
 }

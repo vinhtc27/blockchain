@@ -1,5 +1,6 @@
 mod block;
 mod chain;
+mod merkle;
 mod proof;
 mod transaction;
 mod tx;

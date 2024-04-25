@@ -2,6 +2,7 @@ use num_bigint::{BigInt, Sign};
 use sha2::{Digest, Sha256};
 
 use super::block::Block;
+use crate::Result;
 
 //? Proof Of Work (PoW):
 //Step 1: Take data from the block
@@ -29,16 +30,18 @@ impl<'a> ProofOfWork<'a> {
         Self { block, target }
     }
 
-    pub(crate) fn run(&self) -> (u64, [u8; 32]) {
+    pub(crate) fn run(&self) -> Result<(u64, [u8; 32])> {
         let mut block_hash = [0u8; 32];
         let mut nonce = 0u64;
 
         loop {
-            let data = self.init_data(nonce);
+            let data = self.init_data(nonce)?;
             block_hash.copy_from_slice(&Sha256::digest(&data));
-
             if BigInt::from_bytes_be(Sign::Plus, &block_hash) < self.target {
-                println!("Nonce {:?} - Hash {:?}\r", nonce, hex::encode(block_hash));
+                println!(
+                    "PoW: Nonce {nonce} - Hash {:?}\r",
+                    hex::encode(block_hash).to_string()
+                );
                 break;
             } else {
                 nonce += 1;
@@ -47,20 +50,22 @@ impl<'a> ProofOfWork<'a> {
 
         println!();
 
-        (nonce, block_hash)
+        Ok((nonce, block_hash))
     }
 
-    pub(crate) fn validate(&self) -> bool {
-        let data = self.init_data(self.block.nonce);
-        BigInt::from_bytes_be(Sign::Plus, &Sha256::digest(data)) < self.target
+    pub(crate) fn validate(&self) -> Result<bool> {
+        let data = self.init_data(self.block.nonce)?;
+
+        Ok(BigInt::from_bytes_be(Sign::Plus, &Sha256::digest(data)) < self.target)
     }
 
-    fn init_data(&self, nonce: u64) -> Vec<u8> {
+    fn init_data(&self, nonce: u64) -> Result<Vec<u8>> {
         let mut data = vec![];
         data.extend_from_slice(&self.block.prevhash);
-        data.extend_from_slice(&self.block.hash_transactions());
+        data.extend_from_slice(&self.block.hash_transactions()?);
         data.extend_from_slice(&nonce.to_be_bytes());
         data.extend_from_slice(&DIFFICULTY.to_be_bytes());
-        data
+
+        Ok(data)
     }
 }
