@@ -29,7 +29,7 @@ impl<'a> Block {
     }
 
     pub(crate) fn genesis(coinbase: Transaction) -> Result<Self> {
-        Ok(Self::create_block(vec![coinbase], vec![], 0)?)
+        Self::create_block(vec![coinbase], vec![], 0)
     }
 
     pub(crate) fn create_block(

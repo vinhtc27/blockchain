@@ -11,7 +11,8 @@ use crate::{Error, Result};
 
 use super::wallet::{validate_address, Wallet};
 
-static WALLET_PATH: &str = "./tmp/wallets/wallet";
+static WALLET_PATH: &str = "./tmp/wallet";
+static WALLET_FILE: &str = "./tmp/wallet/wallets.data";
 
 #[derive(Serialize, Deserialize)]
 pub struct Wallets {
@@ -19,22 +20,19 @@ pub struct Wallets {
 }
 
 impl Wallets {
-    pub fn create_wallets(node_id: &str) -> Result<Self> {
+    pub fn create_wallets() -> Result<Self> {
         let mut wallets = Wallets {
             wallets: HashMap::new(),
         };
-        let wallet_path = &format!("{}_{}", WALLET_PATH, node_id);
-        let wallet_file = &format!("{}/wallet.data", wallet_path);
-
-        if Path::new(wallet_file).exists() {
-            let mut file = File::open(wallet_file)?;
+        if Path::new(WALLET_FILE).exists() {
+            let mut file = File::open(WALLET_FILE)?;
             let mut buffer = vec![];
             file.read_to_end(&mut buffer)?;
             wallets = bincode::deserialize(&buffer)?;
         } else {
-            create_dir_all(wallet_path)?;
-            File::create(wallet_file)?;
-            wallets.save_file(node_id)?;
+            create_dir_all(WALLET_PATH)?;
+            File::create(WALLET_FILE)?;
+            wallets.save_file()?;
         }
         Ok(wallets)
     }
@@ -63,15 +61,12 @@ impl Wallets {
         self.wallets.keys().cloned().collect()
     }
 
-    pub fn save_file(&self, node_id: &str) -> Result<()> {
-        let wallet_path = &format!("{}_{}", WALLET_PATH, node_id);
-        let wallet_file = &format!("{}/wallet.data", wallet_path);
-
+    pub fn save_file(&self) -> Result<()> {
         let mut file = OpenOptions::new()
             .write(true)
             .create(true)
             .truncate(true)
-            .open(wallet_file)?;
+            .open(WALLET_FILE)?;
 
         let encoded = bincode::serialize(&self.wallets)?;
         file.write_all(&encoded)?;

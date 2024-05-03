@@ -69,7 +69,7 @@ impl MerkleNode {
         };
 
         if let Some(data) = data {
-            node.hash = Sha256::digest(&data).to_vec();
+            node.hash = Sha256::digest(data).to_vec();
         } else {
             let mut hasher = Sha256::new();
             if let Some(left_node) = left.clone() {

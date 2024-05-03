@@ -1,4 +1,5 @@
 use std::{
+    cmp::Ordering,
     collections::HashMap,
     io::Write,
     sync::{Arc, RwLock},
@@ -13,7 +14,7 @@ use serde_derive::{Deserialize, Serialize};
 
 use crate::{blockchain, Error, Result};
 
-const LOCAL_HOST: &str = "localhost:3000";
+const CENTRAL: &str = "127.0.0.1:3000";
 const VERSION: u32 = 1;
 
 struct Network {
@@ -26,19 +27,12 @@ struct Network {
 
 #[derive(Serialize, Deserialize)]
 enum Command {
-    Addr(Addr),
     Block(Block),
     GetBlocks(GetBlocks),
     GetData(GetData),
     Inv(Inv),
     Transaction(Transaction),
     Version(Version),
-}
-
-#[derive(Serialize, Deserialize)]
-struct Addr {
-    addr_from: String,
-    addr_list: Vec<String>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -79,28 +73,13 @@ struct Version {
     addr_from: String,
 }
 
-// async fn send_addr(network: Arc<RwLock<Network>>, address: &str) -> Result<()> {
-//     let node_address = network.read().unwrap().node_address.clone();
-//     let known_nodes = network.read().unwrap().known_nodes.clone();
-
-//     let mut addr = Addr {
-//         addr_from: node_address.clone(),
-//         addr_list: known_nodes,
-//     };
-//     addr.addr_list.push(node_address);
-
-//     let request = bincode::serialize(&Command::Addr(addr))?;
-
-//     send_data(network, address, &request).await?;
-//     Ok(())
-// }
-
 async fn send_block(
     network: Arc<RwLock<Network>>,
     address: &str,
     block: &blockchain::Block,
 ) -> Result<()> {
-    let node_address = network.read().unwrap().node_address.clone();
+    println!("send_block");
+    let node_address = { network.read().unwrap().node_address.clone() };
 
     let block = Block {
         addr_from: node_address,
@@ -113,7 +92,8 @@ async fn send_block(
 }
 
 async fn send_get_blocks(network: Arc<RwLock<Network>>, address: &str) -> Result<()> {
-    let node_address = network.read().unwrap().node_address.clone();
+    println!("send_get_blocks");
+    let node_address = { network.read().unwrap().node_address.clone() };
 
     let get_blocks = GetBlocks {
         addr_from: node_address,
@@ -131,7 +111,8 @@ async fn send_get_data(
     data_type: String,
     id: Vec<u8>,
 ) -> Result<()> {
-    let node_address = network.read().unwrap().node_address.clone();
+    println!("send_get_data");
+    let node_address = { network.read().unwrap().node_address.clone() };
 
     let get_data = GetData {
         addr_from: node_address,
@@ -151,15 +132,15 @@ async fn send_inv(
     inv_type: String,
     items: Vec<Vec<u8>>,
 ) -> Result<()> {
-    let node_address = network.read().unwrap().node_address.clone();
-
+    println!("send_inv");
+    let node_address = { network.read().unwrap().node_address.clone() };
     let inv = Inv {
         addr_from: node_address,
         inv_type,
         items,
     };
-    let request = bincode::serialize(&Command::Inv(inv))?;
 
+    let request = bincode::serialize(&Command::Inv(inv))?;
     send_data(network, address, &request).await?;
     Ok(())
 }
@@ -169,7 +150,8 @@ async fn send_transaction(
     address: &str,
     tx: &blockchain::Transaction,
 ) -> Result<()> {
-    let node_address = network.read().unwrap().node_address.clone();
+    println!("send_transaction");
+    let node_address = { network.read().unwrap().node_address.clone() };
 
     let transaction = Transaction {
         addr_from: node_address,
@@ -186,8 +168,9 @@ async fn send_version(
     address: &str,
     chain: Arc<RwLock<blockchain::BlockChain>>,
 ) -> Result<()> {
-    let node_address = network.read().unwrap().node_address.clone();
-    let best_height = chain.read().unwrap().get_best_height()?;
+    println!("send_version");
+    let node_address = { network.read().unwrap().node_address.clone() };
+    let best_height = { chain.read().unwrap().get_best_height()? };
 
     let version = Version {
         version: VERSION,
@@ -205,11 +188,13 @@ async fn send_data(network: Arc<RwLock<Network>>, addr: &str, request: &[u8]) ->
     let mut socket = match TcpStream::connect(addr).await {
         Ok(socket) => socket,
         Err(err) => {
-            network
-                .write()
-                .unwrap()
-                .known_nodes
-                .retain(|node| *node != addr);
+            {
+                network
+                    .write()
+                    .unwrap()
+                    .known_nodes
+                    .retain(|node| *node != addr);
+            }
             return Err(Error::CustomError(format!(
                 "Node {} is not available: {}",
                 addr, err
@@ -222,36 +207,23 @@ async fn send_data(network: Arc<RwLock<Network>>, addr: &str, request: &[u8]) ->
     Ok(())
 }
 
-async fn handle_addr(network: Arc<RwLock<Network>>, addr: Addr) -> Result<()> {
-    network
-        .write()
-        .unwrap()
-        .known_nodes
-        .append(&mut addr.addr_list.into_iter().map(|n| n.to_owned()).collect());
-
-    let known_nodes = network.read().unwrap().known_nodes.clone();
-
-    for node in known_nodes {
-        send_get_blocks(network.clone(), &node).await?;
-    }
-
-    Ok(())
-}
-
 async fn handle_block(
     network: Arc<RwLock<Network>>,
     block: Block,
     chain: Arc<RwLock<blockchain::BlockChain>>,
 ) -> Result<()> {
+    println!("handle_block");
     let b: blockchain::Block = bincode::deserialize(&block.block)?;
 
-    println!("Receive a new block");
-    // chain.add_block(block);
-    println!("Added block {:?}", b.hash);
+    {
+        chain.write().unwrap().add_block(&b)?;
+    }
 
-    let blocks_in_transit = network.read().unwrap().blocks_in_transit.clone();
+    println!("Added block {:?}", hex::encode(b.hash));
 
-    if blocks_in_transit.len() > 0 {
+    let blocks_in_transit = { network.read().unwrap().blocks_in_transit.clone() };
+
+    if !blocks_in_transit.is_empty() {
         let block_hash = blocks_in_transit[0].clone();
         send_get_data(
             network.clone(),
@@ -261,9 +233,12 @@ async fn handle_block(
         )
         .await?;
 
-        network.write().unwrap().blocks_in_transit.pop();
+        {
+            network.write().unwrap().blocks_in_transit.pop();
+        }
     } else {
-        let utxo_set = blockchain::UTXOSet::new(chain.read().unwrap().clone());
+        let chain_clone = { chain.read().unwrap().clone() };
+        let utxo_set = blockchain::UTXOSet::new(chain_clone);
         utxo_set.reindex()?;
     }
 
@@ -275,7 +250,8 @@ async fn handle_get_blocks(
     get_block: GetBlocks,
     chain: Arc<RwLock<blockchain::BlockChain>>,
 ) -> Result<()> {
-    let block_hashes = chain.read().unwrap().get_block_hashes()?;
+    println!("handle_get_blocks");
+    let block_hashes = { chain.read().unwrap().get_block_hashes()? };
 
     send_inv(
         network,
@@ -293,8 +269,10 @@ async fn handle_get_data(
     get_data: GetData,
     chain: Arc<RwLock<blockchain::BlockChain>>,
 ) -> Result<()> {
-    if get_data.data_type == "block".to_owned() {
-        let b = chain.read().unwrap().get_block(&get_data.id)?;
+    println!("handle_get_data");
+
+    if get_data.data_type == *"block" {
+        let b = { chain.read().unwrap().get_block(&get_data.id)? };
 
         if b.is_none() {
             return Err(Error::CustomError(format!(
@@ -306,15 +284,17 @@ async fn handle_get_data(
         }
     }
 
-    if get_data.data_type == "tx".to_owned() {
+    if get_data.data_type == *"tx" {
         let tx_id = hex::encode(get_data.id);
-        let tx = network
-            .read()
-            .unwrap()
-            .memory_pool
-            .get(&tx_id)
-            .unwrap()
-            .clone();
+        let tx = {
+            network
+                .read()
+                .unwrap()
+                .memory_pool
+                .get(&tx_id)
+                .unwrap()
+                .clone()
+        };
 
         send_transaction(network, &get_data.addr_from, &tx).await?;
     }
@@ -324,14 +304,16 @@ async fn handle_get_data(
 
 async fn handle_inv(network: Arc<RwLock<Network>>, inv: Inv) -> Result<()> {
     println!(
-        "Receive inventory with {} of  {}",
+        "handle_inv: Receive inventory with {} of  {}",
         inv.items.len(),
         inv.inv_type
     );
 
     let first_item = inv.items[0].clone();
-    if inv.inv_type == "block".to_owned() {
-        network.write().unwrap().blocks_in_transit = inv.items;
+    if inv.inv_type == *"block" {
+        {
+            network.write().unwrap().blocks_in_transit = inv.items;
+        }
 
         send_get_data(
             network.clone(),
@@ -342,7 +324,7 @@ async fn handle_inv(network: Arc<RwLock<Network>>, inv: Inv) -> Result<()> {
         .await?;
 
         let mut new_in_transit = vec![];
-        let blocks_in_transit = network.read().unwrap().blocks_in_transit.clone();
+        let blocks_in_transit = { network.read().unwrap().blocks_in_transit.clone() };
 
         for block_hash in blocks_in_transit {
             if block_hash == first_item {
@@ -351,51 +333,53 @@ async fn handle_inv(network: Arc<RwLock<Network>>, inv: Inv) -> Result<()> {
         }
     }
 
-    if inv.inv_type == "tx".to_owned() {
-        if network
+    if inv.inv_type == *"tx" && {
+        network
             .read()
             .unwrap()
             .memory_pool
             .get(&hex::encode(first_item.clone()))
             .is_none()
-        {
-            send_get_data(network, &inv.addr_from, "tx".to_owned(), first_item).await?;
-        }
+    } {
+        send_get_data(network, &inv.addr_from, "tx".to_owned(), first_item).await?;
     }
 
     Ok(())
 }
 
-async fn handle_tx(
+async fn handle_transaction(
     network: Arc<RwLock<Network>>,
     transaction: Transaction,
     chain: Arc<RwLock<blockchain::BlockChain>>,
 ) -> Result<()> {
+    println!("handle_transaction");
+
     let tx: blockchain::Transaction = bincode::deserialize(&transaction.tx)?;
     let tx_id = tx.id.clone();
-    network
-        .write()
-        .unwrap()
-        .memory_pool
-        .insert(hex::encode(tx_id.clone()), tx);
 
-    let node_address = network.read().unwrap().node_address.clone();
-    let known_nodes = network.read().unwrap().known_nodes.clone();
-    let memory_pool_size = network.read().unwrap().memory_pool.len();
-    let mine_address = network.read().unwrap().mine_address.clone();
+    {
+        network
+            .write()
+            .unwrap()
+            .memory_pool
+            .insert(hex::encode(tx_id.clone()), tx);
+    }
+
+    let node_address = { network.read().unwrap().node_address.clone() };
+    let known_nodes = { network.read().unwrap().known_nodes.clone() };
+    let memory_pool_size = { network.read().unwrap().memory_pool.len() };
+    let mine_address = { network.read().unwrap().mine_address.clone() };
 
     println!("Network {} - pool size {}", node_address, memory_pool_size);
 
-    if node_address == known_nodes[0] {
+    if node_address == CENTRAL {
         for node in known_nodes {
             if node != node_address && node != transaction.addr_from {
                 send_inv(network.clone(), &node, "tx".to_owned(), vec![tx_id.clone()]).await?;
             }
         }
-    } else {
-        if memory_pool_size >= 2 && !mine_address.is_empty() {
-            mine_tx(network, chain).await?
-        }
+    } else if memory_pool_size >= 1 && !mine_address.is_empty() {
+        mine_tx(network, chain).await?
     }
 
     Ok(())
@@ -407,14 +391,15 @@ async fn mine_tx(
 ) -> Result<()> {
     let mut txs = vec![];
 
-    let node_address = network.read().unwrap().node_address.clone();
-    let known_nodes = network.read().unwrap().known_nodes.clone();
-    let memory_pool = network.read().unwrap().memory_pool.clone();
-    let mine_address = network.read().unwrap().mine_address.clone();
+    let node_address = { network.read().unwrap().node_address.clone() };
+    let known_nodes = { network.read().unwrap().known_nodes.clone() };
+    let memory_pool = { network.read().unwrap().memory_pool.clone() };
+    let mine_address = { network.read().unwrap().mine_address.clone() };
 
     for (id, tx) in memory_pool.iter() {
         println!("Tx: {:?}", id);
-        if chain.read().unwrap().verify_transaction(&tx).is_ok() {
+        let verified_tx = { chain.read().unwrap().verify_transaction(tx) };
+        if verified_tx.is_ok() {
             txs.push(tx.clone());
         }
     }
@@ -427,15 +412,18 @@ async fn mine_tx(
     let coinbase_tx = blockchain::Transaction::coinbase_tx(&mine_address)?;
     txs.push(coinbase_tx);
 
-    let block = chain.write().unwrap().mine_block(txs.clone())?;
-    let utxo_set = blockchain::UTXOSet::new(chain.read().unwrap().clone());
+    let block = { chain.write().unwrap().mine_block(txs.clone())? };
+    let chain_clone = { chain.read().unwrap().clone() };
+    let utxo_set = blockchain::UTXOSet::new(chain_clone);
     utxo_set.reindex()?;
 
     println!("New block mined");
 
     for tx in txs {
         let tx_id = hex::encode(tx.id);
-        network.write().unwrap().memory_pool.remove(&tx_id);
+        {
+            network.write().unwrap().memory_pool.remove(&tx_id);
+        }
     }
 
     for node in known_nodes {
@@ -458,20 +446,22 @@ async fn handle_version(
     version: Version,
     chain: Arc<RwLock<blockchain::BlockChain>>,
 ) -> Result<()> {
-    // let best_height = chain.best_height();
-    let best_height = 1;
+    println!("handle_version");
 
+    let best_height = { chain.read().unwrap().get_best_height()? };
     let other_height = version.best_height;
 
-    if best_height < other_height {
-        send_get_blocks(network.clone(), &version.addr_from).await?;
-    } else if best_height > other_height {
-        send_version(network.clone(), &version.addr_from, chain).await?;
+    match best_height.cmp(&other_height) {
+        Ordering::Less => send_get_blocks(network.clone(), &version.addr_from).await?,
+        Ordering::Greater => send_version(network.clone(), &version.addr_from, chain).await?,
+        _ => {}
     }
 
-    let known_nodes = &network.read().unwrap().known_nodes;
+    let known_nodes = { network.read().unwrap().known_nodes.clone() };
     if !known_nodes.contains(&version.addr_from) {
-        network.write().unwrap().known_nodes.push(version.addr_from);
+        {
+            network.write().unwrap().known_nodes.push(version.addr_from);
+        }
     }
 
     Ok(())
@@ -482,32 +472,33 @@ async fn handle_connection(
     mut socket: TcpStream,
     chain: Arc<RwLock<blockchain::BlockChain>>,
 ) -> Result<()> {
-    let mut buffer = [0; 1024];
+    let mut buffer = [0; 8192];
     let bytes_read = socket.read(&mut buffer).await?;
 
     let payload = &buffer[..bytes_read];
     let command: Command = bincode::deserialize(payload)?;
 
     match command {
-        Command::Addr(addr) => handle_addr(network, addr).await?,
         Command::Block(block) => handle_block(network, block, chain).await?,
         Command::Inv(inv) => handle_inv(network, inv).await?,
         Command::GetBlocks(get_blocks) => handle_get_blocks(network, get_blocks, chain).await?,
         Command::GetData(get_data) => handle_get_data(network, get_data, chain).await?,
-        Command::Transaction(transaction) => handle_tx(network, transaction, chain).await?,
+        Command::Transaction(transaction) => {
+            handle_transaction(network, transaction, chain).await?
+        }
         Command::Version(version) => handle_version(network, version, chain).await?,
     }
 
     Ok(())
 }
 
-pub async fn start_server(node_id: &str, _miner_address: &str) -> Result<()> {
-    let node_address = format!("localhost:{}", node_id);
+pub async fn start_server(node_id: &str, miner_address: &str) -> Result<()> {
+    let node_address = format!("127.0.0.1:{}", node_id);
 
     let network = Arc::new(RwLock::new(Network {
-        node_address: String::new(),
-        mine_address: String::new(),
-        known_nodes: vec![LOCAL_HOST.to_owned()],
+        node_address: node_address.clone(),
+        mine_address: miner_address.to_owned(),
+        known_nodes: vec![CENTRAL.to_owned()],
         blocks_in_transit: vec![],
         memory_pool: HashMap::new(),
     }));
@@ -516,26 +507,31 @@ pub async fn start_server(node_id: &str, _miner_address: &str) -> Result<()> {
         node_id,
     )?));
 
-    let listener = TcpListener::bind(node_address).await?;
+    let listener = TcpListener::bind(node_address.clone()).await?;
+
+    if node_address != CENTRAL {
+        send_version(network.clone(), CENTRAL, chain.clone()).await?;
+    }
 
     loop {
         let (socket, _) = listener.accept().await.unwrap();
         let network_clone = network.clone();
         let chain_clone = chain.clone();
 
-        tokio::task::spawn(async move { handle_connection(network_clone, socket, chain_clone) });
+        tokio::spawn(handle_connection(network_clone, socket, chain_clone));
     }
 }
 
-pub fn send_transaction_localhost(node_id: &str, tx: &blockchain::Transaction) -> Result<()> {
-    let node_address = format!("localhost:{}", node_id);
+pub fn send_transaction_central(node_id: &str, tx: &blockchain::Transaction) -> Result<()> {
+    println!("send_transaction_central");
+    let node_address = format!("127.0.0.1:{}", node_id);
 
     let transaction = Transaction {
         addr_from: node_address,
         tx: bincode::serialize(tx)?,
     };
     let request = bincode::serialize(&Command::Transaction(transaction))?;
-    let mut socket = std::net::TcpStream::connect(LOCAL_HOST)?;
-    socket.write(&request)?;
+    let mut socket = std::net::TcpStream::connect(CENTRAL)?;
+    socket.write_all(&request)?;
     Ok(())
 }

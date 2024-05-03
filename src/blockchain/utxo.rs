@@ -128,7 +128,7 @@ impl UTXOSet {
                     accumulated += tx_output.value;
                     unspent_outputs
                         .entry(tx_id.clone())
-                        .or_insert(vec![])
+                        .or_default()
                         .push(out_index as i64);
                 }
             }

@@ -64,8 +64,8 @@ impl CommandLine {
                 self.get_balance(&node_id, &self.args[1])?;
             }
             Command::PrintBlockchain => self.print_blockchain(&node_id)?,
-            Command::CreateWallet => self.create_wallet(&node_id)?,
-            Command::ListAddresses => self.list_addresses(&node_id)?,
+            Command::CreateWallet => self.create_wallet()?,
+            Command::ListAddresses => self.list_addresses()?,
             Command::ReindexUTXO => self.reindex_utxo(&node_id)?,
             Command::StartNode => {
                 if self.args.len() < 2 {
@@ -80,7 +80,7 @@ impl CommandLine {
     }
 
     fn create_blockchain(&self, node_id: &str, address: &str) -> Result<()> {
-        let mut wallets = Wallets::create_wallets(node_id)?;
+        let mut wallets = Wallets::create_wallets()?;
         wallets.get_wallet(address)?;
 
         let chain = BlockChain::init_blockchain(node_id, address)?;
@@ -101,17 +101,21 @@ impl CommandLine {
         amount: u64,
         mine_now: bool,
     ) -> Result<()> {
+        let mut wallets = Wallets::create_wallets()?;
+        wallets.get_wallet(from)?;
+        wallets.get_wallet(to)?;
+
         let mut chain = BlockChain::continue_blockchain(node_id)?;
         let utxo_set = UTXOSet::new(chain.clone());
 
-        let tx = Transaction::new(node_id, from, to, amount, &utxo_set)?;
+        let tx = Transaction::new(from, to, amount, &utxo_set)?;
         if mine_now {
             let coinbase_tx = Transaction::coinbase_tx(from)?;
 
             let block = chain.mine_block(vec![coinbase_tx, tx])?;
             utxo_set.update(&block)?;
         } else {
-            network::send_transaction_localhost(node_id, &tx)?;
+            network::send_transaction_central(node_id, &tx)?;
             println!("Send transaction");
         }
         println!("Send {amount} coin | {from} -> {to}");
@@ -121,11 +125,10 @@ impl CommandLine {
     }
 
     fn get_balance(&self, node_id: &str, address: &str) -> Result<()> {
-        let chain = BlockChain::continue_blockchain(node_id)?;
-
-        let mut wallets = Wallets::create_wallets(node_id)?;
+        let mut wallets = Wallets::create_wallets()?;
         wallets.get_wallet(address)?;
 
+        let chain = BlockChain::continue_blockchain(node_id)?;
         let utxo_set = UTXOSet::new(chain);
         let balance = utxo_set.get_balance(address)?;
 
@@ -146,10 +149,10 @@ impl CommandLine {
         Ok(())
     }
 
-    fn create_wallet(&self, node_id: &str) -> Result<()> {
-        let mut wallets = Wallets::create_wallets(node_id)?;
+    fn create_wallet(&self) -> Result<()> {
+        let mut wallets = Wallets::create_wallets()?;
         let address = wallets.add_wallet()?;
-        wallets.save_file(node_id)?;
+        wallets.save_file()?;
 
         println!("Wallet: {}", address);
 
@@ -157,8 +160,8 @@ impl CommandLine {
         Ok(())
     }
 
-    fn list_addresses(&self, node_id: &str) -> Result<()> {
-        let wallets = Wallets::create_wallets(node_id)?;
+    fn list_addresses(&self) -> Result<()> {
+        let wallets = Wallets::create_wallets()?;
         let addresses = wallets.list_addresses();
 
         println!("List addresses");
@@ -185,7 +188,7 @@ impl CommandLine {
     async fn start_node(&self, node_id: &str, miner_address: &str) -> Result<()> {
         println!("Starting node {node_id}");
 
-        let mut wallets = Wallets::create_wallets(node_id)?;
+        let mut wallets = Wallets::create_wallets()?;
 
         if !miner_address.is_empty() {
             if wallets.get_wallet(miner_address)?.is_some() {

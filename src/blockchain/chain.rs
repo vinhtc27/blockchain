@@ -184,7 +184,7 @@ impl BlockChain {
                         let tx_input_id = hex::encode(&tx_input.id);
                         spent_tx_outputs
                             .entry(tx_input_id)
-                            .or_insert(vec![])
+                            .or_default()
                             .push(tx_input.out);
                     }
                 }
@@ -198,12 +198,7 @@ impl BlockChain {
         Ok(utxo)
     }
 
-    pub(crate) fn sign_transaction(
-        &self,
-        node_id: &str,
-        tx: &mut Transaction,
-        address: &str,
-    ) -> Result<()> {
+    pub(crate) fn sign_transaction(&self, tx: &mut Transaction, address: &str) -> Result<()> {
         let mut prev_txs: HashMap<String, Transaction> = HashMap::new();
 
         for tx_input in tx.inputs.iter() {
@@ -216,7 +211,7 @@ impl BlockChain {
             }
         }
 
-        tx.sign(node_id, address, &prev_txs)?;
+        tx.sign(address, &prev_txs)?;
 
         Ok(())
     }
