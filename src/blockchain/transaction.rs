@@ -30,7 +30,13 @@ impl Transaction {
         Ok(bincode::serialize(&self)?)
     }
 
-    pub fn new(from: &str, to: &str, amount: u64, utxo_set: &UTXOSet) -> Result<Transaction> {
+    pub fn new(
+        node_id: &str,
+        from: &str,
+        to: &str,
+        amount: u64,
+        utxo_set: &UTXOSet,
+    ) -> Result<Transaction> {
         let mut inputs = vec![];
         let mut outputs = vec![];
 
@@ -65,7 +71,7 @@ impl Transaction {
         };
         tx.hash()?;
 
-        utxo_set.chain.sign_transaction(&mut tx, from)?;
+        utxo_set.chain.sign_transaction(node_id, &mut tx, from)?;
 
         Ok(tx)
     }
@@ -82,6 +88,7 @@ impl Transaction {
             inputs: vec![tx_input],
             outputs: vec![tx_ouput],
         };
+
         tx.hash()?;
 
         Ok(tx)
@@ -102,6 +109,7 @@ impl Transaction {
 
     pub(crate) fn sign(
         &mut self,
+        node_id: &str,
         address: &str,
         prev_txs: &HashMap<String, Transaction>,
     ) -> Result<()> {
@@ -130,7 +138,7 @@ impl Transaction {
             tx_copy.hash()?;
             tx_copy.inputs[in_index].public_key_hash = vec![];
 
-            let mut wallets = Wallets::create_wallets()?;
+            let mut wallets = Wallets::create_wallets(node_id)?;
             let signature: Signature = wallets.sign_tx(&tx_copy.id, address)?;
             self.inputs[in_index].signature = signature.serialize_der().to_vec();
         }

@@ -23,7 +23,7 @@ impl MerkleTree {
 
         let mut level = nodes.clone();
         while level.len() > 1 {
-            nodes = Vec::new();
+            nodes = vec![];
             for chunk in level.chunks(2) {
                 let left = if !chunk.is_empty() {
                     Some(chunk[0].clone())

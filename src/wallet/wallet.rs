@@ -57,7 +57,7 @@ pub fn public_key_hash_from_address(address: &str) -> Result<Vec<u8>> {
         .collect())
 }
 
-pub fn validate_address(address: &str) -> Result<bool> {
+pub(crate) fn validate_address(address: &str) -> Result<bool> {
     let decoded_address: Vec<u8> = bs58::decode(address).into_vec()?;
 
     let public_key_hash_len = decoded_address.len();

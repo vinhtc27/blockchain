@@ -4,6 +4,7 @@
 
 pub mod blockchain;
 pub mod cli;
+pub mod network;
 pub mod wallet;
 
 use thiserror::Error;

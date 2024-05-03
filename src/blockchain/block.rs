@@ -1,3 +1,5 @@
+use std::time::SystemTime;
+
 use super::{merkle::MerkleTree, proof::ProofOfWork, transaction::Transaction};
 
 use serde_derive::{Deserialize, Serialize};
@@ -10,6 +12,8 @@ pub struct Block {
     pub(crate) prevhash: Vec<u8>,
     pub(crate) hash: Vec<u8>,
     pub(crate) nonce: u64,
+    pub(crate) height: u64,
+    pub(crate) timestamp: u64,
 }
 
 impl<'a> Block {
@@ -25,15 +29,24 @@ impl<'a> Block {
     }
 
     pub(crate) fn genesis(coinbase: Transaction) -> Result<Self> {
-        Ok(Self::create_block(vec![coinbase], vec![])?)
+        Ok(Self::create_block(vec![coinbase], vec![], 0)?)
     }
 
-    pub(crate) fn create_block(transactions: Vec<Transaction>, prevhash: Vec<u8>) -> Result<Self> {
+    pub(crate) fn create_block(
+        transactions: Vec<Transaction>,
+        prevhash: Vec<u8>,
+        height: u64,
+    ) -> Result<Self> {
         let mut block = Block {
             transactions,
             prevhash,
             hash: vec![],
             nonce: 0u64,
+            height,
+            timestamp: SystemTime::now()
+                .duration_since(SystemTime::UNIX_EPOCH)
+                .expect("System time is earlier than Unix epoch")
+                .as_secs(),
         };
         let (nonce, block_hash) = ProofOfWork::new_proof(&block).run()?;
 
